@@ -212,6 +212,25 @@ class ComponentsSettings(NamedTuple):
     ```
     """
 
+    cache: Optional[str] = None
+    """
+    Name of the [Django cache](https://docs.djangoproject.com/en/5.1/topics/cache/)
+    to be used for storing component's JS and CSS files.
+
+    If `None`, a [`LocMemCache`](https://docs.djangoproject.com/en/5.1/topics/cache/#local-memory-caching)
+    is used with default settings.
+
+    Defaults to `None`.
+
+    Read more about [caching](../../guides/setup/caching).
+
+    ```python
+    COMPONENTS = ComponentsSettings(
+        cache="my_cache",
+    )
+    ```
+    """
+
     context_behavior: Optional[ContextBehaviorType] = None
     """
     Configure whether, inside a component template, you can use variables from the outside
@@ -236,7 +255,35 @@ class ComponentsSettings(NamedTuple):
     > From v0.67 to v0.78 (incl) the default value was `"isolated"`.
     >
     > For v0.79 and later, the default is again `"django"`. See the rationale for change
-    > [here](https://github.com/EmilStenstrom/django-components/issues/498).
+    > [here](https://github.com/django-components/django-components/issues/498).
+    """
+
+    debug_highlight_components: Optional[bool] = None
+    """
+    Enable / disable component highlighting.
+    See [Troubleshooting](../../guides/other/troubleshooting#component-highlighting) for more details.
+
+    Defaults to `False`.
+
+    ```python
+    COMPONENTS = ComponentsSettings(
+        debug_highlight_components=True,
+    )
+    ```
+    """
+
+    debug_highlight_slots: Optional[bool] = None
+    """
+    Enable / disable slot highlighting.
+    See [Troubleshooting](../../guides/other/troubleshooting#slot-highlighting) for more details.
+
+    Defaults to `False`.
+
+    ```python
+    COMPONENTS = ComponentsSettings(
+        debug_highlight_slots=True,
+    )
+    ```
     """
 
     dynamic_component_name: Optional[str] = None
@@ -355,7 +402,7 @@ class ComponentsSettings(NamedTuple):
     [`COMPONENTS.app_dirs`](../settings/#django_components.app_settings.ComponentsSettings.app_dirs)
     change.
 
-    See [Reload dev server on component file changes](../../guides/setup/dev_server_setup/#reload-dev-server-on-component-file-changes).
+    See [Reload dev server on component file changes](../../guides/setup/development_server/#reload-dev-server-on-component-file-changes).
 
     Defaults to `False`.
 
@@ -589,11 +636,14 @@ class Dynamic(Generic[T]):
 # --snippet:defaults--
 defaults = ComponentsSettings(
     autodiscover=True,
+    cache=None,
     context_behavior=ContextBehavior.DJANGO.value,  # "django" | "isolated"
     # Root-level "components" dirs, e.g. `/path/to/proj/components/`
     dirs=Dynamic(lambda: [Path(settings.BASE_DIR) / "components"]),  # type: ignore[arg-type]
     # App-level "components" dirs, e.g. `[app]/components/`
     app_dirs=["components"],
+    debug_highlight_components=False,
+    debug_highlight_slots=False,
     dynamic_component_name="dynamic",
     libraries=[],  # E.g. ["mysite.components.forms", ...]
     multiline_tags=True,
@@ -632,6 +682,10 @@ class InternalSettings:
         return default(self._settings.autodiscover, cast(bool, defaults.autodiscover))
 
     @property
+    def CACHE(self) -> Optional[str]:
+        return default(self._settings.cache, defaults.cache)
+
+    @property
     def DIRS(self) -> Sequence[Union[str, PathLike, Tuple[str, str], Tuple[str, PathLike]]]:
         # For DIRS we use a getter, because default values uses Django settings,
         # which may not yet be initialized at the time these settings are generated.
@@ -642,6 +696,14 @@ class InternalSettings:
     @property
     def APP_DIRS(self) -> Sequence[str]:
         return default(self._settings.app_dirs, cast(List[str], defaults.app_dirs))
+
+    @property
+    def DEBUG_HIGHLIGHT_COMPONENTS(self) -> bool:
+        return default(self._settings.debug_highlight_components, cast(bool, defaults.debug_highlight_components))
+
+    @property
+    def DEBUG_HIGHLIGHT_SLOTS(self) -> bool:
+        return default(self._settings.debug_highlight_slots, cast(bool, defaults.debug_highlight_slots))
 
     @property
     def DYNAMIC_COMPONENT_NAME(self) -> str:

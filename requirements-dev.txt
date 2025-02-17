@@ -6,8 +6,6 @@
 #
 asgiref==3.8.1
     # via django
-beautifulsoup4==4.12.3
-    # via -r requirements-dev.in
 black==24.10.0
     # via -r requirements-dev.in
 cachetools==5.5.0
@@ -28,6 +26,8 @@ distlib==0.3.9
     # via virtualenv
 django==5.1.5
     # via -r requirements-dev.in
+djc-core-html-parser==1.0.1
+    # via -r requirements-dev.in
 filelock==3.16.1
     # via
     #   tox
@@ -46,11 +46,11 @@ idna==3.10
     # via requests
 iniconfig==2.0.0
     # via pytest
-isort==5.13.2
+isort==6.0.0
     # via -r requirements-dev.in
 mccabe==0.7.0
     # via flake8
-mypy==1.14.1
+mypy==1.15.0
     # via -r requirements-dev.in
 mypy-extensions==1.0.0
     # via
@@ -77,7 +77,7 @@ pluggy==1.5.0
     # via
     #   pytest
     #   tox
-pre-commit==4.0.1
+pre-commit==4.1.0
     # via -r requirements-dev.in
 pycodestyle==2.12.1
     # via flake8
@@ -93,11 +93,9 @@ pyyaml==6.0.2
     # via pre-commit
 requests==2.32.3
     # via -r requirements-dev.in
-soupsieve==2.6
-    # via beautifulsoup4
 sqlparse==0.5.2
     # via django
-tox==4.23.2
+tox==4.24.1
     # via -r requirements-dev.in
 types-requests==2.32.0.20241016
     # via -r requirements-dev.in

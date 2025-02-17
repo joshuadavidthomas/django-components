@@ -531,7 +531,7 @@ class ComponentSlotTests(BaseTestCase):
 
         with self.assertRaisesMessage(
             TemplateSyntaxError,
-            "Encountered a SlotNode outside of a ComponentNode context.",
+            "Encountered a SlotNode outside of a Component context.",
         ):
             Template(template_str).render(Context({}))
 
@@ -1112,7 +1112,7 @@ class PassthroughSlotsTest(BaseTestCase):
         self.assertHTMLEqual(rendered, expected)
 
 
-# See https://github.com/EmilStenstrom/django-components/issues/698
+# See https://github.com/django-components/django-components/issues/698
 class NestedSlotsTests(BaseTestCase):
     class NestedSlots(Component):
         template: types.django_html = """

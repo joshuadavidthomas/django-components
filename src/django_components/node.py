@@ -6,12 +6,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type, cast
 from django.template import Context, Library
 from django.template.base import Node, NodeList, Parser, Token
 
-from django_components.util.logger import trace_msg
+from django_components.util.logger import trace_node_msg
 from django_components.util.misc import gen_id
 from django_components.util.template_tag import (
     TagAttr,
-    TagParam,
-    apply_params_in_original_order,
     parse_template_tag,
     resolve_params,
     validate_params,
@@ -89,7 +87,7 @@ class NodeMeta(type):
 
         @functools.wraps(orig_render)
         def wrapper_render(self: "BaseNode", context: Context) -> str:
-            trace_msg("RENDR", self.tag, self.node_id)
+            trace_node_msg("RENDER", self.tag, self.node_id)
 
             resolved_params = resolve_params(self.tag, self.params, context)
 
@@ -135,7 +133,7 @@ class NodeMeta(type):
             # # {'data-id': 1}
             # ```
             #
-            # See https://github.com/EmilStenstrom/django-components/discussions/900#discussioncomment-11859970
+            # See https://github.com/django-components/django-components/discussions/900#discussioncomment-11859970
             resolved_params_without_invalid_kwargs = []
             invalid_kwargs = {}
             did_see_special_kwarg = False
@@ -159,8 +157,7 @@ class NodeMeta(type):
 
             # Validate the params against the signature
             #
-            # Unlike the call to `apply_params_in_original_order()` further below, this uses a signature
-            # that has been stripped of the `self` and `context` parameters. E.g.
+            # This uses a signature that has been stripped of the `self` and `context` parameters. E.g.
             #
             # `def render(name: str, **kwargs: Any) -> None`
             #
@@ -180,23 +177,17 @@ class NodeMeta(type):
             #
             # But cause we stripped the two parameters, then the error will be:
             # `render() takes from 1 positional arguments but 2 were given`
-            validate_params(self.tag, validation_signature, resolved_params_without_invalid_kwargs, invalid_kwargs)
+            args, kwargs = validate_params(
+                orig_render,
+                validation_signature,
+                self.tag,
+                resolved_params_without_invalid_kwargs,
+                invalid_kwargs,
+            )
 
-            # The code below calls the `orig_render()` function like so:
-            # `orig_render(self, context, arg1, arg2, kwarg1=val1, kwarg2=val2)`
-            #
-            # So it's called in the same order as what was passed to the template tag, e.g.
-            # `{% component arg1 arg2 kwarg1=val1 kwarg2=val2 %}`
-            #
-            # That's why we don't simply spread all args and kwargs as `*args, **kwargs`,
-            # because then Python's validation wouldn't catch such errors.
-            resolved_params_with_context = [
-                TagParam(key=None, value=self),
-                TagParam(key=None, value=context),
-            ] + resolved_params_without_invalid_kwargs
-            output = apply_params_in_original_order(orig_render, resolved_params_with_context, invalid_kwargs)
+            output = orig_render(self, context, *args, **kwargs)
 
-            trace_msg("RENDR", self.tag, self.node_id, msg="...Done!")
+            trace_node_msg("RENDER", self.tag, self.node_id, msg="...Done!")
             return output
 
         # Wrap cls.render() so we resolve the args and kwargs and pass them to the
@@ -357,7 +348,7 @@ class BaseNode(Node, metaclass=NodeMeta):
         tag_id = gen_id()
         tag = parse_template_tag(cls.tag, cls.end_tag, cls.allowed_flags, parser, token)
 
-        trace_msg("PARSE", cls.tag, tag_id)
+        trace_node_msg("PARSE", cls.tag, tag_id)
 
         body = tag.parse_body()
         node = cls(
@@ -368,7 +359,7 @@ class BaseNode(Node, metaclass=NodeMeta):
             **kwargs,
         )
 
-        trace_msg("PARSE", cls.tag, tag_id, "...Done!")
+        trace_node_msg("PARSE", cls.tag, tag_id, "...Done!")
         return node
 
     @classmethod

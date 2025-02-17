@@ -18,6 +18,15 @@ class BlockedAndSlottedComponent(Component):
     template_file = "blocked_and_slotted_template.html"
 
 
+class RelativeFileComponentUsingTemplateFile(Component):
+    template_file = "relative_extends.html"
+
+
+class RelativeFileComponentUsingGetTemplateName(Component):
+    def get_template_name(self, context):
+        return "relative_extends.html"
+
+
 #######################
 # TESTS
 #######################
@@ -557,7 +566,6 @@ class ExtendsCompatTests(BaseTestCase):
 
         template: types.django_html = """
             {% extends "block_in_component.html" %}
-            {% load component_tags %}
             {% block body %}
             <div>
                 58 giraffes and 2 pantaloons
@@ -826,14 +834,60 @@ class ExtendsCompatTests(BaseTestCase):
             <!DOCTYPE html>
             <html lang="en">
             <body>
-                <custom-template data-djc-id-a1bc43>
+                <custom-template data-djc-id-a1bc44>
                     <header></header>
                     <main>
-                        <div data-djc-id-a1bc47> injected: DepInject(hello='from_block') </div>
+                        <div data-djc-id-a1bc48> injected: DepInject(hello='from_block') </div>
                     </main>
                     <footer>Default footer</footer>
                 </custom-template>
             </body>
+            </html>
+        """
+        self.assertHTMLEqual(rendered, expected)
+
+    @parametrize_context_behavior(["django", "isolated"])
+    def test_component_using_template_file_extends_relative_file(self):
+        registry.register("relative_file_component_using_template_file", RelativeFileComponentUsingTemplateFile)
+
+        template: types.django_html = """
+            {% load component_tags %}
+            {% component "relative_file_component_using_template_file" %}{% endcomponent %}
+        """
+        rendered = Template(template).render(Context())
+        expected = """
+            <!DOCTYPE html>
+            <html data-djc-id-a1bc3f="" lang="en">
+              <body>
+                <main role="main">
+                  <div class='container main-container'>
+                    BLOCK OVERRIDEN
+                  </div>
+                </main>
+              </body>
+            </html>
+        """
+        self.assertHTMLEqual(rendered, expected)
+
+    @parametrize_context_behavior(["django", "isolated"])
+    def test_component_using_get_template_name_extends_relative_file(self):
+        registry.register("relative_file_component_using_get_template_name", RelativeFileComponentUsingGetTemplateName)
+
+        template: types.django_html = """
+            {% load component_tags %}
+            {% component "relative_file_component_using_get_template_name" %}{% endcomponent %}
+        """
+        rendered = Template(template).render(Context())
+        expected = """
+            <!DOCTYPE html>
+            <html data-djc-id-a1bc3f="" lang="en">
+              <body>
+                <main role="main">
+                  <div class='container main-container'>
+                    BLOCK OVERRIDEN
+                  </div>
+                </main>
+              </body>
             </html>
         """
         self.assertHTMLEqual(rendered, expected)

@@ -153,7 +153,7 @@ class ComponentTest(BaseTestCase):
             pass
 
         with self.assertRaises(ImproperlyConfigured):
-            EmptyComponent("empty_component")._get_template(Context({}))
+            EmptyComponent("empty_component")._get_template(Context({}), "123")
 
     @parametrize_context_behavior(["django", "isolated"])
     def test_template_string_static_inlined(self):
@@ -425,7 +425,7 @@ class ComponentTest(BaseTestCase):
 
         with self.assertRaisesMessage(
             TypeError,
-            "An error occured while rendering components Root > parent > provider > broken:\n"
+            "An error occured while rendering components Root > parent > provider > provider(slot:content) > broken:\n"
             "tuple indices must be integers or slices, not str",
         ):
             Root.render()
@@ -1019,8 +1019,8 @@ class ComponentRenderTest(BaseTestCase):
             """,
         )
 
-    # See https://github.com/EmilStenstrom/django-components/issues/580
-    # And https://github.com/EmilStenstrom/django-components/commit/fee26ec1d8b46b5ee065ca1ce6143889b0f96764
+    # See https://github.com/django-components/django-components/issues/580
+    # And https://github.com/django-components/django-components/commit/fee26ec1d8b46b5ee065ca1ce6143889b0f96764
     @parametrize_context_behavior(["django", "isolated"])
     def test_render_with_include_and_context(self):
         class SimpleComponent(Component):
@@ -1041,9 +1041,9 @@ class ComponentRenderTest(BaseTestCase):
             """,
         )
 
-    # See https://github.com/EmilStenstrom/django-components/issues/580
-    # And https://github.com/EmilStenstrom/django-components/issues/634
-    # And https://github.com/EmilStenstrom/django-components/commit/fee26ec1d8b46b5ee065ca1ce6143889b0f96764
+    # See https://github.com/django-components/django-components/issues/580
+    # And https://github.com/django-components/django-components/issues/634
+    # And https://github.com/django-components/django-components/commit/fee26ec1d8b46b5ee065ca1ce6143889b0f96764
     @parametrize_context_behavior(["django", "isolated"])
     def test_render_with_include_and_request_context(self):
         class SimpleComponent(Component):
@@ -1064,8 +1064,8 @@ class ComponentRenderTest(BaseTestCase):
             """,
         )
 
-    # See https://github.com/EmilStenstrom/django-components/issues/580
-    # And https://github.com/EmilStenstrom/django-components/issues/634
+    # See https://github.com/django-components/django-components/issues/580
+    # And https://github.com/django-components/django-components/issues/634
     @parametrize_context_behavior(["django", "isolated"])
     def test_request_context_is_populated_from_context_processors(self):
         @register("thing")
@@ -1248,6 +1248,16 @@ class ComponentRenderTest(BaseTestCase):
 
 class ComponentHookTest(BaseTestCase):
     def test_on_render_before(self):
+        @register("nested")
+        class NestedComponent(Component):
+            template: types.django_html = """
+                {% load component_tags %}
+                Hello from nested
+                <div>
+                    {% slot "content" default / %}
+                </div>
+            """
+
         class SimpleComponent(Component):
             template: types.django_html = """
                 {% load component_tags %}
@@ -1255,6 +1265,10 @@ class ComponentHookTest(BaseTestCase):
                 kwargs: {{ kwargs|safe }}
                 ---
                 from_on_before: {{ from_on_before }}
+                ---
+                {% component "nested" %}
+                    Hello from simple
+                {% endcomponent %}
             """
 
             def get_context_data(self, *args, **kwargs):
@@ -1268,6 +1282,9 @@ class ComponentHookTest(BaseTestCase):
                 context["from_on_before"] = ":)"
 
                 # Insert text into the Template
+                #
+                # NOTE: Users should NOT do this, because this will insert the text every time
+                #       the component is rendered.
                 template.nodelist.append(TextNode("\n---\nFROM_ON_BEFORE"))
 
         rendered = SimpleComponent.render()
@@ -1279,6 +1296,11 @@ class ComponentHookTest(BaseTestCase):
             ---
             from_on_before: :)
             ---
+            Hello from nested
+            <div data-djc-id-a1bc3e data-djc-id-a1bc40>
+                Hello from simple
+            </div>
+            ---
             FROM_ON_BEFORE
             """,
         )
@@ -1287,13 +1309,27 @@ class ComponentHookTest(BaseTestCase):
     def test_on_render_after(self):
         captured_content = None
 
+        @register("nested")
+        class NestedComponent(Component):
+            template: types.django_html = """
+                {% load component_tags %}
+                Hello from nested
+                <div>
+                    {% slot "content" default / %}
+                </div>
+            """
+
         class SimpleComponent(Component):
             template: types.django_html = """
                 {% load component_tags %}
                 args: {{ args|safe }}
                 kwargs: {{ kwargs|safe }}
                 ---
-                from_on_before: {{ from_on_before }}
+                from_on_after: {{ from_on_after }}
+                ---
+                {% component "nested" %}
+                    Hello from simple
+                {% endcomponent %}
             """
 
             def get_context_data(self, *args, **kwargs):
@@ -1305,10 +1341,10 @@ class ComponentHookTest(BaseTestCase):
             # Check that modifying the context or template does nothing
             def on_render_after(self, context: Context, template: Template, content: str) -> None:
                 # Insert value into the Context
-                context["from_on_before"] = ":)"
+                context["from_on_after"] = ":)"
 
                 # Insert text into the Template
-                template.nodelist.append(TextNode("\n---\nFROM_ON_BEFORE"))
+                template.nodelist.append(TextNode("\n---\nFROM_ON_AFTER"))
 
                 nonlocal captured_content
                 captured_content = content
@@ -1321,7 +1357,12 @@ class ComponentHookTest(BaseTestCase):
             args: ()
             kwargs: {}
             ---
-            from_on_before:
+            from_on_after:
+            ---
+            Hello from nested
+            <div data-djc-id-a1bc3e data-djc-id-a1bc40>
+                Hello from simple
+            </div>
             """,
         )
         self.assertHTMLEqual(
@@ -1330,7 +1371,12 @@ class ComponentHookTest(BaseTestCase):
             args: ()
             kwargs: {}
             ---
-            from_on_before:
+            from_on_after:
+            ---
+            Hello from nested
+            <div data-djc-id-a1bc3e data-djc-id-a1bc40>
+                Hello from simple
+            </div>
             """,
         )
 
@@ -1339,6 +1385,16 @@ class ComponentHookTest(BaseTestCase):
     def test_on_render_after_override_output(self):
         captured_content = None
 
+        @register("nested")
+        class NestedComponent(Component):
+            template: types.django_html = """
+                {% load component_tags %}
+                Hello from nested
+                <div>
+                    {% slot "content" default / %}
+                </div>
+            """
+
         class SimpleComponent(Component):
             template: types.django_html = """
                 {% load component_tags %}
@@ -1346,6 +1402,10 @@ class ComponentHookTest(BaseTestCase):
                 kwargs: {{ kwargs|safe }}
                 ---
                 from_on_before: {{ from_on_before }}
+                ---
+                {% component "nested" %}
+                    Hello from simple
+                {% endcomponent %}
             """
 
             def get_context_data(self, *args, **kwargs):
@@ -1369,6 +1429,11 @@ class ComponentHookTest(BaseTestCase):
             kwargs: {}
             ---
             from_on_before:
+            ---
+            Hello from nested
+            <div data-djc-id-a1bc3e data-djc-id-a1bc40>
+                Hello from simple
+            </div>
             """,
         )
         self.assertHTMLEqual(
@@ -1379,5 +1444,63 @@ class ComponentHookTest(BaseTestCase):
             kwargs: {}
             ---
             from_on_before:
+            ---
+            Hello from nested
+            <div data-djc-id-a1bc3e data-djc-id-a1bc40>
+                Hello from simple
+            </div>
             """,
         )
+
+    def test_on_render_before_after_same_context(self):
+        context_in_before = None
+        context_in_after = None
+
+        @register("nested")
+        class NestedComponent(Component):
+            template: types.django_html = """
+                {% load component_tags %}
+                Hello from nested
+                <div>
+                    {% slot "content" default / %}
+                </div>
+            """
+
+        class SimpleComponent(Component):
+            template: types.django_html = """
+                {% load component_tags %}
+                args: {{ args|safe }}
+                kwargs: {{ kwargs|safe }}
+                ---
+                from_on_after: {{ from_on_after }}
+                ---
+                {% component "nested" %}
+                    Hello from simple
+                {% endcomponent %}
+            """
+
+            def get_context_data(self, *args, **kwargs):
+                return {
+                    "args": args,
+                    "kwargs": kwargs,
+                }
+
+            def on_render_before(self, context: Context, template: Template) -> None:
+                context["from_on_before"] = ":)"
+                nonlocal context_in_before
+                context_in_before = context
+
+            # Check that modifying the context or template does nothing
+            def on_render_after(self, context: Context, template: Template, html: str) -> None:
+                context["from_on_after"] = ":)"
+                nonlocal context_in_after
+                context_in_after = context
+
+        SimpleComponent.render()
+
+        self.assertEqual(
+            context_in_before,
+            context_in_after,
+        )
+        self.assertIn("from_on_before", context_in_before)
+        self.assertIn("from_on_after", context_in_after)

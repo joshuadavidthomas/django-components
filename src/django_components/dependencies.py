@@ -4,8 +4,6 @@ import base64
 import json
 import re
 import sys
-from abc import ABC, abstractmethod
-from functools import lru_cache
 from hashlib import md5
 from typing import (
     TYPE_CHECKING,
@@ -33,10 +31,11 @@ from django.templatetags.static import static
 from django.urls import path, reverse
 from django.utils.decorators import sync_and_async_middleware
 from django.utils.safestring import SafeString, mark_safe
+from djc_core_html_parser import set_html_attributes
 
+from django_components.cache import get_component_media_cache
 from django_components.node import BaseNode
-from django_components.util.html import SoupNode
-from django_components.util.misc import get_import_path, is_nonempty_str
+from django_components.util.misc import is_nonempty_str
 
 if TYPE_CHECKING:
     from django_components.component import Component
@@ -47,38 +46,15 @@ RenderType = Literal["document", "fragment"]
 
 
 #########################################################
-# 1. Cache the inlined component JS and CSS scripts,
-#    so they can be referenced and retrieved later via
-#    an ID.
+# 1. Cache the inlined component JS and CSS scripts (`Component.js` and `Component.css`).
+#
+#    To support HTML fragments, when a fragment is loaded on a page,
+#    we on-demand request the JS and CSS files of the components that are
+#    referenced in the fragment.
+#
+#    Thus, we need to persist the JS and CSS files across requests. These are then accessed
+#    via `cached_script_view` endpoint.
 #########################################################
-
-
-class ComponentMediaCacheABC(ABC):
-    @abstractmethod
-    def get(self, key: str) -> Optional[str]: ...  # noqa: #704
-
-    @abstractmethod
-    def has(self, key: str) -> bool: ...  # noqa: #704
-
-    @abstractmethod
-    def set(self, key: str, value: str) -> None: ...  # noqa: #704
-
-
-class InMemoryComponentMediaCache(ComponentMediaCacheABC):
-    def __init__(self) -> None:
-        self._data: Dict[str, str] = {}
-
-    def get(self, key: str) -> Optional[str]:
-        return self._data.get(key, None)
-
-    def has(self, key: str) -> bool:
-        return key in self._data
-
-    def set(self, key: str, value: str) -> None:
-        self._data[key] = value
-
-
-comp_media_cache = InMemoryComponentMediaCache()
 
 
 # NOTE: Initially, we fetched components by their registered name, but that didn't work
@@ -102,14 +78,9 @@ else:
     comp_hash_mapping: WeakValueDictionary[str, Type["Component"]] = WeakValueDictionary()
 
 
-# Convert Component class to something like `TableComp_a91d03`
-@lru_cache(None)
-def _hash_comp_cls(comp_cls: Type["Component"]) -> str:
-    full_name = get_import_path(comp_cls)
-    comp_cls_hash = md5(full_name.encode()).hexdigest()[0:6]
-    return comp_cls.__name__ + "_" + comp_cls_hash
-
-
+# Generate keys like
+# `__components:MyButton_a78y37:js:df7c6d10`
+# `__components:MyButton_a78y37:css`
 def _gen_cache_key(
     comp_cls_hash: str,
     script_type: ScriptType,
@@ -126,9 +97,9 @@ def _is_script_in_cache(
     script_type: ScriptType,
     input_hash: Optional[str],
 ) -> bool:
-    comp_cls_hash = _hash_comp_cls(comp_cls)
-    cache_key = _gen_cache_key(comp_cls_hash, script_type, input_hash)
-    return comp_media_cache.has(cache_key)
+    cache_key = _gen_cache_key(comp_cls._class_hash, script_type, input_hash)
+    cache = get_component_media_cache()
+    return cache.has_key(cache_key)
 
 
 def _cache_script(
@@ -141,17 +112,17 @@ def _cache_script(
     Given a component and it's inlined JS or CSS, store the JS/CSS in a cache,
     so it can be retrieved via URL endpoint.
     """
-    comp_cls_hash = _hash_comp_cls(comp_cls)
 
     # E.g. `__components:MyButton:js:df7c6d10`
     if script_type in ("js", "css"):
-        cache_key = _gen_cache_key(comp_cls_hash, script_type, input_hash)
+        cache_key = _gen_cache_key(comp_cls._class_hash, script_type, input_hash)
     else:
         raise ValueError(f"Unexpected script_type '{script_type}'")
 
     # NOTE: By setting the script in the cache, we will be able to retrieve it
     # via the endpoint, e.g. when we make a request to `/components/cache/MyComp_ab0c2d.js`.
-    comp_media_cache.set(cache_key, script.strip())
+    cache = get_component_media_cache()
+    cache.set(cache_key, script.strip())
 
 
 def cache_component_js(comp_cls: Type["Component"]) -> None:
@@ -197,7 +168,7 @@ def cache_component_js_vars(comp_cls: Type["Component"], js_vars: Dict) -> Optio
     if not _is_script_in_cache(comp_cls, "js", input_hash):
         _cache_script(
             comp_cls=comp_cls,
-            script="",  # TODO
+            script="",  # TODO - enable JS and CSS vars
             script_type="js",
             input_hash=input_hash,
         )
@@ -205,7 +176,7 @@ def cache_component_js_vars(comp_cls: Type["Component"], js_vars: Dict) -> Optio
     return input_hash
 
 
-def wrap_component_js(comp_cls: Type["Component"], content: str) -> SafeString:
+def wrap_component_js(comp_cls: Type["Component"], content: str) -> str:
     if "</script" in content:
         raise RuntimeError(
             f"Content of `Component.js` for component '{comp_cls.__name__}' contains '</script>' end tag. "
@@ -247,7 +218,7 @@ def cache_component_css_vars(comp_cls: Type["Component"], css_vars: Dict) -> Opt
     if not _is_script_in_cache(comp_cls, "css", input_hash):
         _cache_script(
             comp_cls=comp_cls,
-            script="",  # TODO
+            script="",  # TODO - enable JS and CSS vars
             script_type="css",
             input_hash=input_hash,
         )
@@ -255,7 +226,7 @@ def cache_component_css_vars(comp_cls: Type["Component"], css_vars: Dict) -> Opt
     return input_hash
 
 
-def wrap_component_css(comp_cls: Type["Component"], content: str) -> SafeString:
+def wrap_component_css(comp_cls: Type["Component"], content: str) -> str:
     if "</style" in content:
         raise RuntimeError(
             f"Content of `Component.css` for component '{comp_cls.__name__}' contains '</style>' end tag. "
@@ -272,36 +243,83 @@ def wrap_component_css(comp_cls: Type["Component"], content: str) -> SafeString:
 #########################################################
 
 
-def _link_dependencies_with_component_html(
-    component_id: str,
-    html_content: str,
+def set_component_attrs_for_js_and_css(
+    html_content: Union[str, SafeString],
+    component_id: Optional[str],
     css_input_hash: Optional[str],
-) -> str:
-    elems = SoupNode.from_fragment(html_content)
+    css_scope_id: Optional[str],
+    root_attributes: Optional[List[str]] = None,
+) -> Tuple[Union[str, SafeString], Dict[str, List[str]]]:
+    # These are the attributes that we want to set on the root element.
+    all_root_attributes = [*root_attributes] if root_attributes else []
 
-    # Insert component ID
-    for elem in elems:
-        # Ignore comments, text, doctype, etc.
-        if not elem.is_element():
-            continue
+    # Component ID is used for executing JS script, e.g. `data-djc-id-a1b2c3`
+    #
+    # NOTE: We use `data-djc-css-a1b2c3` and `data-djc-id-a1b2c3` instead of
+    # `data-djc-css="a1b2c3"` and `data-djc-id="a1b2c3"`, to allow
+    # multiple values to be associated with the same element, which may happen if
+    # one component renders another.
+    if component_id:
+        all_root_attributes.append(f"data-djc-id-{component_id}")
 
-        # Component ID is used for executing JS script, e.g. `data-djc-id-a1b2c3`
+    # Attribute by which we bind the CSS variables to the component's CSS,
+    # e.g. `data-djc-css-a1b2c3`
+    if css_input_hash:
+        all_root_attributes.append(f"data-djc-css-{css_input_hash}")
+
+    # These attributes are set on all tags
+    all_attributes = []
+
+    # We apply the CSS scoping attribute to both root and non-root tags.
+    #
+    # This is the HTML part of Vue-like CSS scoping.
+    # That is, for each HTML element that the component renders, we add a `data-djc-scope-a1b2c3` attribute.
+    # And we stop when we come across a nested components.
+    if css_scope_id:
+        all_attributes.append(f"data-djc-scope-{css_scope_id}")
+
+    is_safestring = isinstance(html_content, SafeString)
+    updated_html, child_components = set_html_attributes(
+        html_content,
+        root_attributes=all_root_attributes,
+        all_attributes=all_attributes,
+        # Setting this means that set_html_attributes will check for HTML elemetnts with this
+        # attribute, and return a dictionary of {attribute_value: [attributes_set_on_this_tag]}.
         #
-        # NOTE: We use `data-djc-css-a1b2c3` and `data-djc-id-a1b2c3` instead of
-        # `data-djc-css="a1b2c3"` and `data-djc-id="a1b2c3"`, to allow
-        # multiple values to be associated with the same element, which may happen if
-        # One component renders another.
-        elem.set_attr(f"data-djc-id-{component_id}", True)
+        # So if HTML contains tag <template djc-render-id="123"></template>,
+        # and we set on that tag `data-djc-id-123`, then we will get
+        # {
+        #   "123": ["data-djc-id-123"],
+        # }
+        #
+        # This is a minor optimization. Without this, when we're rendering components in
+        # component_post_render(), we'd have to parse each `<template djc-render-id="123"></template>`
+        # to find the HTML attribute that were set on it.
+        watch_on_attribute="djc-render-id",
+    )
+    updated_html = mark_safe(updated_html) if is_safestring else updated_html
 
-        # Attribute by which we bind the CSS variables to the component's CSS,
-        # e.g. `data-djc-css-a1b2c3`
-        if css_input_hash:
-            elem.set_attr(f"data-djc-css-{css_input_hash}", True)
-
-    return SoupNode.to_html_multiroot(elems)
+    return updated_html, child_components
 
 
-def _insert_component_comment(
+# NOTE: To better understand the next section, consider this:
+#
+# We define and cache the component's JS and CSS at the same time as
+# when we render the HTML. However, the resulting HTML MAY OR MAY NOT
+# be used in another component.
+#
+# IF the component's HTML IS used in another component, and the other
+# component want to render the JS or CSS dependencies (e.g. inside <head>),
+# then it's only at that point when we want to access the data about
+# which JS and CSS scripts is the component's HTML associated with.
+#
+# This happens AFTER the rendering context, so there's no Context to rely on.
+#
+# Hence, we store the info about associated JS and CSS right in the HTML itself.
+# As an HTML comment `<!-- -->`. Thus, the inner component can be used as many times
+# and in different components, and they will all know to fetch also JS and CSS of the
+# inner components.
+def insert_component_dependencies_comment(
     content: str,
     # NOTE: We pass around the component CLASS, so the dependencies logic is not
     # dependent on ComponentRegistries
@@ -309,72 +327,17 @@ def _insert_component_comment(
     component_id: str,
     js_input_hash: Optional[str],
     css_input_hash: Optional[str],
-) -> str:
+) -> SafeString:
     """
     Given some textual content, prepend it with a short string that
     will be used by the ComponentDependencyMiddleware to collect all
     declared JS / CSS scripts.
     """
-    # Add components to the cache
-    comp_cls_hash = _hash_comp_cls(component_cls)
-    comp_hash_mapping[comp_cls_hash] = component_cls
-
-    data = f"{comp_cls_hash},{component_id},{js_input_hash or ''},{css_input_hash or ''}"
+    data = f"{component_cls._class_hash},{component_id},{js_input_hash or ''},{css_input_hash or ''}"
 
     # NOTE: It's important that we put the comment BEFORE the content, so we can
     # use the order of comments to evaluate components' instance JS code in the correct order.
     output = mark_safe(COMPONENT_DEPS_COMMENT.format(data=data) + content)
-    return output
-
-
-# Anything and everything that needs to be done with a Component's HTML
-# script in order to support running JS and CSS per-instance.
-def postprocess_component_html(
-    component_cls: Type["Component"],
-    component_id: str,
-    html_content: str,
-    css_input_hash: Optional[str],
-    js_input_hash: Optional[str],
-    type: RenderType,
-    render_dependencies: bool,
-) -> str:
-    # Make the HTML work with JS and CSS dependencies
-    html_content = _link_dependencies_with_component_html(
-        component_id=component_id,
-        html_content=html_content,
-        css_input_hash=css_input_hash,
-    )
-
-    # NOTE: To better understand the next section, consider this:
-    #
-    # We define and cache the component's JS and CSS at the same time as
-    # when we render the HTML. However, the resulting HTML MAY OR MAY NOT
-    # be used in another component.
-    #
-    # IF the component's HTML IS used in another component, and the other
-    # component want to render the JS or CSS dependencies (e.g. inside <head>),
-    # then it's only at that point when we want to access the data about
-    # which JS and CSS scripts is the component's HTML associated with.
-    #
-    # This happens AFTER the rendering context, so there's no Context to rely on.
-    #
-    # Hence, we store the info about associated JS and CSS right in the HTML itself.
-    # As an HTML comment `<!-- -->`. Thus, the inner component can be used as many times
-    # and in different components, and they will all know to fetch also JS and CSS of the
-    # inner components.
-
-    # Mark the generated HTML so that we will know which JS and CSS
-    # scripts are associated with it.
-    output = _insert_component_comment(
-        html_content,
-        component_cls=component_cls,
-        component_id=component_id,
-        js_input_hash=js_input_hash,
-        css_input_hash=css_input_hash,
-    )
-
-    if render_dependencies:
-        output = _render_dependencies(output, type)
     return output
 
 
@@ -411,14 +374,14 @@ SCRIPT_NAME_REGEX = re.compile(
     rb"^(?P<comp_cls_hash>[\w\-\./]+?),(?P<id>[\w]+?),(?P<js>[0-9a-f]*?),(?P<css>[0-9a-f]*?)$"
 )
 # E.g. `data-djc-id-a1b2c3`
-MAYBE_COMP_ID = r"(?: data-djc-id-\w{6})?"
+MAYBE_COMP_ID = r'(?: data-djc-id-\w{6}="")?'
 # E.g. `data-djc-css-99914b`
-MAYBE_COMP_CSS_ID = r"(?: data-djc-css-\w{6})?"
+MAYBE_COMP_CSS_ID = r'(?: data-djc-css-\w{6}="")?'
 
 PLACEHOLDER_REGEX = re.compile(
     r"{css_placeholder}|{js_placeholder}".format(
-        css_placeholder=f'<link{MAYBE_COMP_CSS_ID}{MAYBE_COMP_ID} name="{CSS_PLACEHOLDER_NAME}"/?>',
-        js_placeholder=f'<script{MAYBE_COMP_CSS_ID}{MAYBE_COMP_ID} name="{JS_PLACEHOLDER_NAME}"></script>',
+        css_placeholder=f'<link name="{CSS_PLACEHOLDER_NAME}"{MAYBE_COMP_CSS_ID}{MAYBE_COMP_ID}/?>',
+        js_placeholder=f'<script name="{JS_PLACEHOLDER_NAME}"{MAYBE_COMP_CSS_ID}{MAYBE_COMP_ID}></script>',
     ).encode()
 )
 
@@ -734,6 +697,10 @@ def _process_dep_declarations(content: bytes, type: RenderType) -> Tuple[bytes, 
     return (content, final_script_tags.encode("utf-8"), final_css_tags.encode("utf-8"))
 
 
+href_pattern = re.compile(r'href="([^"]+)"')
+src_pattern = re.compile(r'src="([^"]+)"')
+
+
 # Detect duplicates by URLs, extract URLs, and sort by URLs
 def _postprocess_media_tags(
     script_type: ScriptType,
@@ -743,15 +710,21 @@ def _postprocess_media_tags(
     tags_by_url: Dict[str, str] = {}
 
     for tag in tags:
-        node = SoupNode.from_fragment(tag.strip())[0]
-        # <script src="..."> vs <link href="...">
-        attr = "src" if script_type == "js" else "href"
-        maybe_url = node.get_attr(attr, None)
+        # Extract the URL from <script src="..."> or <link href="...">
+        if script_type == "js":
+            attr = "src"
+            attr_pattern = src_pattern
+        else:
+            attr = "href"
+            attr_pattern = href_pattern
+
+        maybe_url_match = attr_pattern.search(tag.strip())
+        maybe_url = maybe_url_match.group(1) if maybe_url_match else None
 
         if not is_nonempty_str(maybe_url):
             raise RuntimeError(
                 f"One of entries for `Component.Media.{script_type}` media is missing a "
-                f"value for attribute '{attr}'. If there is content inlined inside the `<{node.name()}>` tags, "
+                f"value for attribute '{attr}'. If there is content inlined inside the `<{attr}>` tags, "
                 f"you must move the content to a `.{script_type}` file and reference it via '{attr}'.\nGot:\n{tag}"
             )
 
@@ -830,10 +803,10 @@ def get_script_content(
     script_type: ScriptType,
     comp_cls: Type["Component"],
     input_hash: Optional[str],
-) -> SafeString:
-    comp_cls_hash = _hash_comp_cls(comp_cls)
-    cache_key = _gen_cache_key(comp_cls_hash, script_type, input_hash)
-    script = comp_media_cache.get(cache_key)
+) -> Optional[str]:
+    cache = get_component_media_cache()
+    cache_key = _gen_cache_key(comp_cls._class_hash, script_type, input_hash)
+    script = cache.get(cache_key)
 
     return script
 
@@ -842,8 +815,13 @@ def get_script_tag(
     script_type: ScriptType,
     comp_cls: Type["Component"],
     input_hash: Optional[str],
-) -> SafeString:
+) -> str:
     content = get_script_content(script_type, comp_cls, input_hash)
+    if content is None:
+        raise RuntimeError(
+            f"Could not find {script_type.upper()} for component '{comp_cls.__name__}' "
+            f"(hash: {comp_cls._class_hash})"
+        )
 
     if script_type == "js":
         content = wrap_component_js(comp_cls, content)
@@ -860,12 +838,10 @@ def get_script_url(
     comp_cls: Type["Component"],
     input_hash: Optional[str],
 ) -> str:
-    comp_cls_hash = _hash_comp_cls(comp_cls)
-
     return reverse(
         CACHE_ENDPOINT_NAME,
         kwargs={
-            "comp_cls_hash": comp_cls_hash,
+            "comp_cls_hash": comp_cls._class_hash,
             "script_type": script_type,
             **({"input_hash": input_hash} if input_hash is not None else {}),
         },
@@ -908,6 +884,9 @@ def _gen_exec_script(
     return exec_script
 
 
+head_or_body_end_tag_re = re.compile(r"<\/(?:head|body)\s*>", re.DOTALL)
+
+
 def _insert_js_css_to_default_locations(
     html_content: str,
     js_content: Optional[str],
@@ -917,37 +896,50 @@ def _insert_js_css_to_default_locations(
     This function tries to insert the JS and CSS content into the default locations.
 
     JS is inserted at the end of `<body>`, and CSS is inserted at the end of `<head>`.
-    """
-    elems = SoupNode.from_fragment(html_content)
 
-    if not elems:
+    We find these tags by looking for the first `</head>` and last `</body>` tags.
+    """
+    if css_content is None and js_content is None:
         return None
 
     did_modify_html = False
 
-    if css_content is not None:
-        for elem in elems:
-            if not elem.is_element():
-                continue
-            head = elem.find_tag("head")
-            if head:
-                css_elems = SoupNode.from_fragment(css_content)
-                head.append_children(css_elems)
-                did_modify_html = True
+    first_end_head_tag_index = None
+    last_end_body_tag_index = None
 
-    if js_content is not None:
-        for elem in elems:
-            if not elem.is_element():
-                continue
-            body = elem.find_tag("body")
-            if body:
-                js_elems = SoupNode.from_fragment(js_content)
-                body.append_children(js_elems)
-                did_modify_html = True
+    # First check the content for the first `</head>` and last `</body>` tags
+    for match in head_or_body_end_tag_re.finditer(html_content):
+        tag_name = match[0][2:6]
+
+        # We target the first `</head>`, thus, after we set it, we skip the rest
+        if tag_name == "head":
+            if css_content is not None and first_end_head_tag_index is None:
+                first_end_head_tag_index = match.start()
+
+        # But for `</body>`, we want the last occurrence, so we insert the content only
+        # after the loop.
+        elif tag_name == "body":
+            if js_content is not None:
+                last_end_body_tag_index = match.start()
+
+        else:
+            raise ValueError(f"Unexpected tag name '{tag_name}'")
+
+    # Then do two string insertions. First the CSS, because we assume that <head> is before <body>.
+    index_offset = 0
+    updated_html = html_content
+    if css_content is not None and first_end_head_tag_index is not None:
+        updated_html = updated_html[:first_end_head_tag_index] + css_content + updated_html[first_end_head_tag_index:]
+        index_offset = len(css_content)
+        did_modify_html = True
+
+    if js_content is not None and last_end_body_tag_index is not None:
+        js_index = last_end_body_tag_index + index_offset
+        updated_html = updated_html[:js_index] + js_content + updated_html[js_index:]
+        did_modify_html = True
 
     if did_modify_html:
-        transformed = SoupNode.to_html_multiroot(elems)
-        return transformed
+        return updated_html
     else:
         return None  # No changes made
 

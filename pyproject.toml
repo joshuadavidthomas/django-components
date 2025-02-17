@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "django_components"
-version = "0.124"
+version = "0.129"
 requires-python = ">=3.8, <4.0"
 description = "A way to create simple reusable template components in Django."
 keywords = ["django", "components", "css", "js", "html"]
@@ -29,16 +29,16 @@ classifiers = [
 ]
 dependencies = [
     'Django>=4.2',
-    'beautifulsoup4>=4.12',
+    'djc-core-html-parser>=1.0',
 ]
 license = {text = "MIT"}
 
 # See https://docs.pypi.org/project_metadata/#icons
 [project.urls]
-Homepage = "https://github.com/EmilStenstrom/django-components/"
-Documentation = "https://emilstenstrom.github.io/django-components/"
-Changelog = "https://emilstenstrom.github.io/django-components/latest/release_notes/"
-Issues = "https://github.com/EmilStenstrom/django-components/issues"
+Homepage = "https://github.com/django-components/django-components/"
+Documentation = "https://django-components.github.io/django-components/"
+Changelog = "https://django-components.github.io/django-components/latest/release_notes/"
+Issues = "https://github.com/django-components/django-components/issues"
 Donate = "https://github.com/sponsors/EmilStenstrom"
 
 
@@ -119,6 +119,7 @@ requires = [
 [tool.hatch.envs.default]
 dependencies = [
     "django",
+    "djc-core-html-parser",
     "tox",
     "pytest",
     "flake8",

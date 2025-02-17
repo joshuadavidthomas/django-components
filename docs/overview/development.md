@@ -5,17 +5,24 @@ weight: 7
 
 ## Install locally and run the tests
 
-Start by forking the project by clicking the **Fork button** up in the right corner in the [GitHub](https://github.com/EmilStenstrom/django-components).
+Start by forking the project by clicking the **Fork button** up in the right corner in the [GitHub](https://github.com/django-components/django-components).
 This makes a copy of the repository in your own name. Now you can clone this repository locally and start adding features:
 
 ```sh
 git clone https://github.com/<your GitHub username>/django-components.git
+cd django-components
 ```
 
 To quickly run the tests install the local dependencies by running:
 
 ```sh
 pip install -r requirements-dev.txt
+```
+
+You also have to install this local django-components version. Use `-e` for [editable mode](https://setuptools.pypa.io/en/latest/userguide/development_mode.html) so you don't have to re-install after every change:
+
+```sh
+pip install -e .
 ```
 
 Now you can run the tests to make sure everything works as expected:
@@ -35,6 +42,20 @@ pyenv install -s 3.12
 pyenv install -s 3.13
 pyenv local 3.8 3.9 3.10 3.11 3.12 3.13
 tox -p
+```
+
+To run tests for a specific Python version, use:
+
+```sh
+tox -e py38
+```
+
+NOTE: See the available environments in `tox.ini`.
+
+And to run only linters, use:
+
+```sh
+tox -e mypy,flake8,isort,black
 ```
 
 ## Running Playwright tests
@@ -58,15 +79,15 @@ tox
 
 How do you check that your changes to django-components project will work in an actual Django project?
 
-Use the [sampleproject](https://github.com/EmilStenstrom/django-components/tree/master/sampleproject/) demo project to validate the changes:
+Use the [sampleproject](https://github.com/django-components/django-components/tree/master/sampleproject/) demo project to validate the changes:
 
-1. Navigate to [sampleproject](https://github.com/EmilStenstrom/django-components/tree/master/sampleproject/) directory:
+1. Navigate to [sampleproject](https://github.com/django-components/django-components/tree/master/sampleproject/) directory:
 
     ```sh
     cd sampleproject
     ```
 
-2. Install dependencies from the [requirements.txt](https://github.com/EmilStenstrom/django-components/blob/master/sampleproject/requirements.txt) file:
+2. Install dependencies from the [requirements.txt](https://github.com/django-components/django-components/blob/master/sampleproject/requirements.txt) file:
 
     ```sh
     pip install -r requirements.txt
@@ -138,7 +159,7 @@ To publish the package to PyPI, use `twine` ([See Python user guide](https://pac
 twine upload --repository pypi dist/* -u __token__ -p <PyPI_TOKEN>
 ```
 
-[See the full workflow here.](https://github.com/EmilStenstrom/django-components/discussions/557#discussioncomment-10179141)
+[See the full workflow here.](https://github.com/django-components/django-components/discussions/557#discussioncomment-10179141)
 
 ## Development guides
 

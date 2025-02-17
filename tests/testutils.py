@@ -30,11 +30,17 @@ class BaseTestCase(SimpleTestCase):
         super().tearDown()
         registry.clear()
 
-        from django_components.template import template_cache
+        from django_components.cache import component_media_cache, template_cache
 
         # NOTE: There are 1-2 tests which check Templates, so we need to clear the cache
         if template_cache:
             template_cache.clear()
+
+        if component_media_cache:
+            component_media_cache.clear()
+
+        from django_components.component import component_node_subclasses_by_name
+        component_node_subclasses_by_name.clear()
 
     # Mock the `generate` function used inside `gen_id` so it returns deterministic IDs
     def _start_gen_id_patch(self):
@@ -177,10 +183,16 @@ def parametrize_context_behavior(cases: List[ContextBehParam], settings: Optiona
                 self._start_gen_id_patch()
 
                 # Reset template cache
-                from django_components.template import template_cache
+                from django_components.cache import component_media_cache, template_cache
 
                 if template_cache:  # May be None if the cache was not initialized
                     template_cache.clear()
+
+                if component_media_cache:
+                    component_media_cache.clear()
+
+                from django_components.component import component_node_subclasses_by_name
+                component_node_subclasses_by_name.clear()
 
                 case_has_data = not isinstance(case, str)
 
